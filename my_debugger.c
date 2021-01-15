@@ -125,12 +125,12 @@ void run_redirection_debugger(pid_t child_pid, int fd, long start_addr, bool cop
 }
 int main(int argc, char** argv)
 {
-    long addr = strtol(argv[1], NULL, 0);
+    long addr = strtol(argv[1], NULL, 16);
     bool copy = argv[2] == "c";
     char* fname = argv[3];
     char* args[argc-3];
     
-    for(int i = 2; i < argc; i++) 
+    for(int i = 2; i < argc; i++)
         args[i-2] = argv[i+1];
     
     int fd = open(fname, O_CREAT);
