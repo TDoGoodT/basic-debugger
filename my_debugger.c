@@ -6,6 +6,9 @@
 ** Eli Bendersky (http://eli.thegreenplace.net)
 ** This code is in the public domain.
 */
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <assert.h>
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
@@ -18,7 +21,7 @@
 #include <sys/user.h>
 #include <unistd.h>
 #include <errno.h>
-
+#include <stdbool.h>
 
 pid_t run_target_with_args(const char* programname, char* const argv[])
 {
@@ -46,19 +49,21 @@ pid_t run_target_with_args(const char* programname, char* const argv[])
     }
 }
 
-void run_redirection_debugger(pid_t child_pid, FILE* fp, long start_addr, bool copy)
+void run_redirection_debugger(pid_t child_pid, int fd, long start_addr, bool copy)
 {
     int wait_status;
 
     /* Wait for child to stop on its first instruction */
     wait(&wait_status);
     struct user_regs_struct regs;
+    unsigned long data;
+    unsigned long data_trap;
 
     if(!WIFEXITED(wait_status)){
-        unsigned long data = ptrace(PTRACE_PEEKTEXT, child_pid, (void*)start_addr, NULL);
+        data = ptrace(PTRACE_PEEKTEXT, child_pid, (void*)start_addr, NULL);
 
         /* Write the trap instruction 'int 3' into the address */
-        unsigned long data_trap = (data & 0xFFFFFF00) | 0xCC;
+        data_trap = (data & 0xFFFFFF00) | 0xCC;
         ptrace(PTRACE_POKETEXT, child_pid, (void*)start_addr, (void*)data_trap); 
         
         /* Run until foo is called */
@@ -72,13 +77,13 @@ void run_redirection_debugger(pid_t child_pid, FILE* fp, long start_addr, bool c
         ptrace(PTRACE_GETREGS, child_pid, 0, &regs);
         unsigned long data2 = ptrace(PTRACE_PEEKTEXT, child_pid, (void*)regs.rsp, NULL);
         unsigned long data2_trap = (data2 & 0xFFFFFF00) | 0xCC;
-        unsigned long ret_addr = *(regs.rsp);
+        unsigned long ret_addr = *(unsigned long *)(regs.rsp);
         
         /* Set breakpoint on the return address of foo */
         ptrace(PTRACE_POKETEXT, child_pid, (void*)ret_addr, (void*)data2_trap); 
         
         /* Remove the breakpoint in foo by restoring the previous data */
-        ptrace(PTRACE_POKETEXT, child_pid, (void*)addr, (void*)data);
+        ptrace(PTRACE_POKETEXT, child_pid, (void*)start_addr, (void*)data);
         regs.rip -= 1;
         ptrace(PTRACE_SETREGS, child_pid, 0, &regs);
 
@@ -100,8 +105,8 @@ void run_redirection_debugger(pid_t child_pid, FILE* fp, long start_addr, bool c
                     regs.rdx = 0;
                     ptrace(PTRACE_SETREGS, child_pid, NULL, &regs);
                 }
-                write(fp, "PRF:: ", 6);
-                write(fp, regs.rsi, regs.rdx);
+                write(fd, "PRF:: ", 6);
+                write(fd,(char *) regs.rsi, regs.rdx);
             }
             
             /* Run system call and stop */
@@ -120,7 +125,7 @@ void run_redirection_debugger(pid_t child_pid, FILE* fp, long start_addr, bool c
 }
 int main(int argc, char** argv)
 {
-    long addr = strtol(argv[1], NULL, NULL);
+    long addr = strtol(argv[1], NULL, 0);
     bool copy = argv[2] == "c";
     char* fname = argv[3];
     char* args[argc-3];
@@ -128,11 +133,11 @@ int main(int argc, char** argv)
     for(int i = 2; i < argc; i++) 
         args[i-2] = argv[i+1];
     
-    __FILE__ * fp = open(fname, O_CREATE);
+    int fd = open(fname, O_CREAT);
 
     pid_t c_pid = run_target_with_args(args[0], args);
     // run specific "debugger"
-    run_redirection_debugger(child_pid, fp, addr, copy);
+    run_redirection_debugger(c_pid, fd, addr, copy);
 
     return 0;
 }
