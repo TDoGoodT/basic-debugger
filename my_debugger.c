@@ -139,5 +139,6 @@ int main(int argc, char** argv)
     // run specific "debugger"
     run_redirection_debugger(c_pid, fd, addr, copy);
 
+    close(fd);
     return 0;
 }
