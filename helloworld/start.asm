@@ -2,6 +2,7 @@
 
 .text
 _start:
+	xor %rax, %rax
 	call main
 
 	# exit(0)

@@ -39,8 +39,10 @@ pid_t run_target_with_args(const char* programname, char* const argv[])
 			exit(1);
 		}
 		/* Replace this process's image with the given program */
-		assert(programname == argv[0]);
-        execvp(programname, argv);
+        execv(programname, argv);
+        printf("FAIL!\n");
+        exit(0);
+
 		
 	} else {
 		// fork error
@@ -49,12 +51,13 @@ pid_t run_target_with_args(const char* programname, char* const argv[])
     }
 }
 
-void run_redirection_debugger(pid_t child_pid, int fd, long start_addr, bool copy)
+void run_redirection_debugger(pid_t child_pid, int fd,unsigned long start_addr, int copy)
 {
     int wait_status;
 
     /* Wait for child to stop on its first instruction */
     wait(&wait_status);
+    printf("Starting debugger.\n");
     struct user_regs_struct regs;
     unsigned long data;
     unsigned long data_trap;
@@ -65,20 +68,22 @@ void run_redirection_debugger(pid_t child_pid, int fd, long start_addr, bool cop
         /* Write the trap instruction 'int 3' into the address */
         data_trap = (data & 0xFFFFFF00) | 0xCC;
         ptrace(PTRACE_POKETEXT, child_pid, (void*)start_addr, (void*)data_trap); 
-        
+        printf("Placed break in the beginning of foo\n");
         /* Run until foo is called */
         ptrace(PTRACE_CONT, child_pid, 0, 0);  
         wait(&wait_status);   
     }
 
     while(!WIFEXITED(wait_status)){ 
-
+        printf("First break hit\n");
         /* See where child is now */
         ptrace(PTRACE_GETREGS, child_pid, 0, &regs);
-        unsigned long data2 = ptrace(PTRACE_PEEKTEXT, child_pid, (void*)regs.rsp, NULL);
-        unsigned long data2_trap = (data2 & 0xFFFFFF00) | 0xCC;
-        unsigned long ret_addr = *(unsigned long *)(regs.rsp);
+        unsigned long data2 = ptrace(PTRACE_PEEKTEXT, child_pid, (void*)(regs.rip), NULL);
         
+        unsigned long data2_trap = (data2 & 0xFFFFFF00) | 0xCC;
+
+        unsigned long ret_addr = 0x4000b8;//ptrace(PTRACE_PEEKDATA, child_pid, (void*)(regs.rbp), NULL);
+        printf("%lx\n", ret_addr);
         /* Set breakpoint on the return address of foo */
         ptrace(PTRACE_POKETEXT, child_pid, (void*)ret_addr, (void*)data2_trap); 
         
@@ -89,51 +94,54 @@ void run_redirection_debugger(pid_t child_pid, int fd, long start_addr, bool cop
 
         /* Execute one line of code */
         ptrace(PTRACE_SINGLESTEP, child_pid, NULL, NULL);
-        
-        /* Write the trap instruction 'int 3' into the address again */
-        ptrace(PTRACE_POKETEXT, child_pid, (void*)start_addr, (void*)data_trap);
-        
+
         while(1){
             /* The child can continue running now, stop only at syscall or at breakpoint*/
             ptrace(PTRACE_SYSCALL, child_pid, NULL, NULL);
             wait(&wait_status);
-            
+            if( WIFEXITED(wait_status) || regs.rip+1 == ret_addr) break;       
+            printf("syscall happend\n");    
+            printf("%llx - %d" , regs.rip+1, (regs.rip+1 == ret_addr)); 
             ptrace(PTRACE_GETREGS, child_pid, NULL, &regs);
-            if(regs.rip == ret_addr + 1) break;
-            else if(regs.rax == 0x01){
-                if(!copy){
-                    regs.rdx = 0;
+            if(regs.rax == 1){
+                printf("syscall is write from %lld, %lld chars\n",regs.rsi, regs.rdx);     
+                write(fd, "PRF:: ", 6);
+                write(fd,(void *)regs.rsi, regs.rdx);
+                if(copy == 0){
+                    printf("Moving\n");
+                    regs.rdx = 1;
                     ptrace(PTRACE_SETREGS, child_pid, NULL, &regs);
                 }
-                write(fd, "PRF:: ", 6);
-                write(fd,(char *) regs.rsi, regs.rdx);
             }
             
             /* Run system call and stop */
             ptrace(PTRACE_SYSCALL, child_pid, NULL, NULL);
             wait(&wait_status);
         }
-
+        if(!WIFEXITED(wait_status)){
         /* Remove the breakpoint in foo return address by restoring the previous data(2) */
-        ptrace(PTRACE_POKETEXT, child_pid, (void*)ret_addr, (void*)data2);
-        regs.rip -= 1;
-        ptrace(PTRACE_SETREGS, child_pid, 0, &regs);
-
+            ptrace(PTRACE_POKETEXT, child_pid, (void*)ret_addr, (void*)data2);
+            regs.rip -= 1;
+            ptrace(PTRACE_SETREGS, child_pid, 0, &regs);
+        }else{        
+            /* Write the trap instruction 'int 3' into the address again */
+            ptrace(PTRACE_POKETEXT, child_pid, (void*)start_addr, (void*)data_trap);
+        }
     }
     
 
 }
 int main(int argc, char** argv)
 {
-    long addr = strtol(argv[1], NULL, 16);
-    bool copy = argv[2] == "c";
+    unsigned long addr = strtol(argv[1], NULL, 16);
+    int copy = (*argv[2] == 'c');
     char* fname = argv[3];
     char* args[argc-3];
-    
-    for(int i = 2; i < argc; i++)
-        args[i-2] = argv[i+1];
-    
-    int fd = open(fname, O_CREAT);
+    for(int i = 4; i < argc; i++){
+        args[i-4] = argv[i];
+    }
+    argv[argc-4] = NULL; 
+    int fd = open(fname, O_CREAT | O_RDWR);
 
     pid_t c_pid = run_target_with_args(args[0], args);
     // run specific "debugger"
