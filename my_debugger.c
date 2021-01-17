@@ -78,12 +78,12 @@ void run_redirection_debugger(pid_t child_pid, int fd,unsigned long start_addr, 
         printf("First break hit\n");
         /* See where child is now */
         ptrace(PTRACE_GETREGS, child_pid, 0, &regs);
-        unsigned long data2 = ptrace(PTRACE_PEEKTEXT, child_pid, (void*)(regs.rip), NULL);
+        unsigned long ret_addr = ptrace(PTRACE_PEEKTEXT, child_pid, (void*)(regs.rsp), NULL);//ptrace(PTRACE_PEEKDATA, child_pid, (void*)(regs.rbp), NULL);
+
+        unsigned long data2 = ptrace(PTRACE_PEEKTEXT, child_pid, ret_addr, NULL);
         
         unsigned long data2_trap = (data2 & 0xFFFFFF00) | 0xCC;
 
-        unsigned long ret_addr = 0x4000b8;//ptrace(PTRACE_PEEKDATA, child_pid, (void*)(regs.rbp), NULL);
-        printf("%lx\n", ret_addr);
         /* Set breakpoint on the return address of foo */
         ptrace(PTRACE_POKETEXT, child_pid, (void*)ret_addr, (void*)data2_trap); 
         
