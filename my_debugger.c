@@ -74,12 +74,12 @@ void run_redirection_debugger(pid_t child_pid, int fd,unsigned long start_addr, 
     }
 
     while(!WIFEXITED(wait_status)){
-        printf("First break hit\n");
+        printf("break hit\n");
         /* See where child is now */
         ptrace(PTRACE_GETREGS, child_pid, 0, &regs);
         
         /* Get the function return addres */
-        unsigned long ret_addr = ptrace(PTRACE_PEEKTEXT, child_pid, (void*)(regs.rsp), NULL);//ptrace(PTRACE_PEEKDATA, child_pid, (void*)(regs.rbp), NULL);
+        unsigned long ret_addr = ptrace(PTRACE_PEEKTEXT, child_pid, (void*)(regs.rsp), NULL);
         printf("function called from address: %lx", ret_addr);
         /* Put a breakpoint at the return address of the function */
         unsigned long data2 = ptrace(PTRACE_PEEKTEXT, child_pid, ret_addr, NULL);
@@ -102,7 +102,7 @@ void run_redirection_debugger(pid_t child_pid, int fd,unsigned long start_addr, 
             wait(&wait_status);
 
             if(WIFEXITED(wait_status)) return;
-            else if(regs.rip == ret_addr || regs.rip - 1 == ret_addr) break;       
+            //else if(regs.rip == ret_addr || regs.rip - 1 == ret_addr) break;       
             //printf("syscall happend\n");    
             printf("%llx - %d\n" , regs.rip+1, (regs.rip-1 == ret_addr)); 
             ptrace(PTRACE_GETREGS, child_pid, NULL, &regs);
@@ -126,6 +126,8 @@ void run_redirection_debugger(pid_t child_pid, int fd,unsigned long start_addr, 
         ptrace(PTRACE_POKETEXT, child_pid, (void*)ret_addr, (void*)data2);
         regs.rip -= 1;
         ptrace(PTRACE_SETREGS, child_pid, 0, &regs);
+
+        /* Continue running the child process until next break or exit*/
         ptrace(PTRACE_CONT, child_pid, NULL, NULL);
         wait(&wait_status);
     }
@@ -145,7 +147,6 @@ int main(int argc, char** argv)
     int fd = open(fname, O_CREAT | O_RDWR);
 
     pid_t c_pid = run_target_with_args(args[0], args);
-    // run specific "debugger"
     run_redirection_debugger(c_pid, fd, addr, copy);
 
     close(fd);
