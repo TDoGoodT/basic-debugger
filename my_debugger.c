@@ -99,7 +99,8 @@ void run_redirection_debugger(pid_t child_pid, int fd,unsigned long start_addr, 
             ptrace(PTRACE_SYSCALL, child_pid, NULL, NULL);
             wait(&wait_status);
 
-            if(WIFEXITED(wait_status) || regs.rip == ret_addr || regs.rip - 1== ret_addr) break;       
+            if(WIFEXITED(wait_status)) return;
+            else if(regs.rip == ret_addr || regs.rip - 1== ret_addr) break;       
             //printf("syscall happend\n");    
             printf("%llx - %d\n" , regs.rip+1, (regs.rip-1 == ret_addr)); 
             ptrace(PTRACE_GETREGS, child_pid, NULL, &regs);
@@ -118,14 +119,13 @@ void run_redirection_debugger(pid_t child_pid, int fd,unsigned long start_addr, 
             ptrace(PTRACE_SYSCALL, child_pid, NULL, NULL);
             wait(&wait_status);
         }
-        if(!WIFEXITED(wait_status)){
+
         /* Remove the breakpoint in foo return address by restoring the previous data(2) */
-            ptrace(PTRACE_POKETEXT, child_pid, (void*)ret_addr, (void*)data2);
-            regs.rip -= 1;
-            ptrace(PTRACE_SETREGS, child_pid, 0, &regs);
-            ptrace(PTRACE_CONT, child_pid, NULL, NULL);
-            wait(&wait_status);
-        }
+        ptrace(PTRACE_POKETEXT, child_pid, (void*)ret_addr, (void*)data2);
+        regs.rip -= 1;
+        ptrace(PTRACE_SETREGS, child_pid, 0, &regs);
+        ptrace(PTRACE_CONT, child_pid, NULL, NULL);
+        wait(&wait_status);
     }
     
 
