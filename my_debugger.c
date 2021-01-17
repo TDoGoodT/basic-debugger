@@ -73,7 +73,7 @@ void run_redirection_debugger(pid_t child_pid, int fd,unsigned long start_addr, 
         wait(&wait_status);   
     }
 
-    while(!WIFEXITED(wait_status)){ 
+    while(!WIFEXITED(wait_status)){
         printf("First break hit\n");
         /* See where child is now */
         ptrace(PTRACE_GETREGS, child_pid, 0, &regs);
@@ -93,14 +93,15 @@ void run_redirection_debugger(pid_t child_pid, int fd,unsigned long start_addr, 
         ptrace(PTRACE_SINGLESTEP, child_pid, NULL, NULL);
         /* Put back the breakpoint */
         ptrace(PTRACE_POKETEXT, child_pid, (void*)start_addr, (void*)data_trap); 
+
         while(1){
             /* The child can continue running now, stop only at syscall or ret */
             ptrace(PTRACE_SYSCALL, child_pid, NULL, NULL);
             wait(&wait_status);
 
-            if( WIFEXITED(wait_status) || regs.rip == ret_addr) break;       
-            printf("syscall happend\n");    
-            printf("%llx - %d\n" , regs.rip+1, (regs.rip+1 == ret_addr)); 
+            if(WIFEXITED(wait_status) || regs.rip == ret_addr || regs.rip - 1== ret_addr) break;       
+            //printf("syscall happend\n");    
+            printf("%llx - %d\n" , regs.rip+1, (regs.rip-1 == ret_addr)); 
             ptrace(PTRACE_GETREGS, child_pid, NULL, &regs);
             if(regs.rax == 1){
                 printf("syscall is write from %lld, %lld chars\n",regs.rsi, regs.rdx);     
@@ -122,6 +123,8 @@ void run_redirection_debugger(pid_t child_pid, int fd,unsigned long start_addr, 
             ptrace(PTRACE_POKETEXT, child_pid, (void*)ret_addr, (void*)data2);
             regs.rip -= 1;
             ptrace(PTRACE_SETREGS, child_pid, 0, &regs);
+            ptrace(PTRACE_CONT, child_pid, NULL, NULL);
+            wait(&wait_status);
         }
     }
     
