@@ -77,8 +77,10 @@ void run_redirection_debugger(pid_t child_pid, int fd,unsigned long start_addr, 
         printf("First break hit\n");
         /* See where child is now */
         ptrace(PTRACE_GETREGS, child_pid, 0, &regs);
+        
         /* Get the function return addres */
         unsigned long ret_addr = ptrace(PTRACE_PEEKTEXT, child_pid, (void*)(regs.rsp), NULL);//ptrace(PTRACE_PEEKDATA, child_pid, (void*)(regs.rbp), NULL);
+        printf("function called from address: %lx", ret_addr);
         /* Put a breakpoint at the return address of the function */
         unsigned long data2 = ptrace(PTRACE_PEEKTEXT, child_pid, ret_addr, NULL);
         unsigned long data2_trap = (data2 & 0xFFFFFF00) | 0xCC;
@@ -100,7 +102,7 @@ void run_redirection_debugger(pid_t child_pid, int fd,unsigned long start_addr, 
             wait(&wait_status);
 
             if(WIFEXITED(wait_status)) return;
-            else if(regs.rip == ret_addr || regs.rip - 1== ret_addr) break;       
+            else if(regs.rip == ret_addr || regs.rip - 1 == ret_addr) break;       
             //printf("syscall happend\n");    
             printf("%llx - %d\n" , regs.rip+1, (regs.rip-1 == ret_addr)); 
             ptrace(PTRACE_GETREGS, child_pid, NULL, &regs);
