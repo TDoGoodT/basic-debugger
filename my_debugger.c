@@ -122,6 +122,7 @@ void run_redirection_debugger(pid_t child_pid, int fd,unsigned long start_addr, 
             ptrace(PTRACE_POKETEXT, child_pid, (void*)ret_addr, (void*)data2);
             regs.rip -= 1;
             ptrace(PTRACE_SETREGS, child_pid, 0, &regs);
+        }
     }
     
 
