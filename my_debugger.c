@@ -53,37 +53,36 @@ pid_t run_target_with_args(const char* programname, char* const argv[])
 
 void run_redirection_debugger(pid_t child_pid, int fd,unsigned long start_addr, int copy)
 {
-    int wait_status;
+    int wait_status, iwrote = 0;
 
     /* Wait for child to stop on its first instruction */
     wait(&wait_status);
-    printf("Starting debugger.\n");
     struct user_regs_struct regs;
-    unsigned long data;
-    unsigned long data_trap;
+    unsigned long data, data2, data_trap, data2_trap, ret_addr, orig_fd;
 
     if(!WIFEXITED(wait_status)){
+        /* Get the fisrt line in the function */
         data = ptrace(PTRACE_PEEKTEXT, child_pid, (void*)start_addr, NULL);
 
         /* Write the trap instruction 'int 3' into the address */
-        data_trap = (data & 0xFFFFFF00) | 0xCC;
+        data_trap = (data & 0xFFFFFFFFFFFFFF00) | 0xCC;
         ptrace(PTRACE_POKETEXT, child_pid, (void*)start_addr, (void*)data_trap); 
-        /* Run until foo is called */
+        
+        /* Run until the function is called */
         ptrace(PTRACE_CONT, child_pid, 0, 0);  
         wait(&wait_status);   
     }
 
     while(!WIFEXITED(wait_status)){
-        printf("break hit\n");
         /* See where child is now */
         ptrace(PTRACE_GETREGS, child_pid, 0, &regs);
         
         /* Get the function return addres */
-        unsigned long ret_addr = ptrace(PTRACE_PEEKTEXT, child_pid, (void*)(regs.rsp), NULL);
-        printf("function called from address: %lx", ret_addr);
+        ret_addr = ptrace(PTRACE_PEEKTEXT, child_pid, (void*)(regs.rsp), NULL);
+        
         /* Put a breakpoint at the return address of the function */
-        unsigned long data2 = ptrace(PTRACE_PEEKTEXT, child_pid, ret_addr, NULL);
-        unsigned long data2_trap = (data2 & 0xFFFFFF00) | 0xCC;
+        data2 = ptrace(PTRACE_PEEKTEXT, child_pid, (void*) ret_addr, NULL);
+        data2_trap = (data2 & 0xFFFFFFFFFFFFFF00) | 0xCC;
         ptrace(PTRACE_POKETEXT, child_pid, (void*)ret_addr, (void*)data2_trap); 
         
         /* Remove the breakpoint in foo by restoring the previous data */
@@ -93,35 +92,60 @@ void run_redirection_debugger(pid_t child_pid, int fd,unsigned long start_addr, 
 
         /* Execute one line of code */
         ptrace(PTRACE_SINGLESTEP, child_pid, NULL, NULL);
+        wait(&wait_status);
         /* Put back the breakpoint */
         ptrace(PTRACE_POKETEXT, child_pid, (void*)start_addr, (void*)data_trap); 
+        
+        ptrace(PTRACE_GETREGS, child_pid, NULL, &regs);
 
         while(1){
+            iwrote = 0;
             /* The child can continue running now, stop only at syscall or ret */
-            ptrace(PTRACE_SYSCALL, child_pid, NULL, NULL);
-            wait(&wait_status);
-
-            if(WIFEXITED(wait_status)) return;
-            //else if(regs.rip == ret_addr || regs.rip - 1 == ret_addr) break;       
-            //printf("syscall happend\n");    
-            printf("%llx - %d\n" , regs.rip+1, (regs.rip-1 == ret_addr)); 
-            ptrace(PTRACE_GETREGS, child_pid, NULL, &regs);
-            if(regs.rax == 1){
-                printf("syscall is write from %lld, %lld chars\n",regs.rsi, regs.rdx);     
-                write(fd, "PRF:: ", 6);
-                write(fd,(void *)regs.rsi, regs.rdx);
-                if(copy == 0){
-                    printf("Moving\n");
-                    regs.rdx = 0;
-                    ptrace(PTRACE_SETREGS, child_pid, NULL, &regs);
-                }
+            if(ptrace(PTRACE_SYSCALL, child_pid, NULL, NULL) < 0){
+                perror("ptrace1");
+                return;
             }
-            
-            /* Run system call and stop */
-            ptrace(PTRACE_SYSCALL, child_pid, NULL, NULL);
             wait(&wait_status);
-        }
 
+            /* Get the current regs struct */
+            ptrace(PTRACE_GETREGS, child_pid, NULL, &regs);
+
+            /* Break if we returned from the function */
+            if(regs.rip - 1 == ret_addr) break;
+            if(regs.orig_rax == 1){
+                write(fd, "PRF:: ", 6);
+                orig_fd = regs.rdi;
+                regs.rdi = fd;
+                ptrace(PTRACE_SETREGS, child_pid, 0, &regs);
+                iwrote = 1;
+            }
+
+            /* Run system call and stop */
+            if(ptrace(PTRACE_SYSCALL, child_pid, NULL, NULL) < 0){
+                perror("ptrace2");
+                return;
+            }
+            wait(&wait_status);
+
+            if(iwrote == 1 && copy == 1){
+                iwrote = 0;
+                regs.rdi = orig_fd;
+                regs.rip -= 2;
+                regs.rax = 1;
+                ptrace(PTRACE_SETREGS, child_pid, 0, &regs);                
+                
+                ptrace(PTRACE_SYSCALL, child_pid, NULL, NULL);
+                wait(&wait_status); 
+                
+                ptrace(PTRACE_SYSCALL, child_pid, NULL, NULL);
+                wait(&wait_status); 
+            }
+            ptrace(PTRACE_GETREGS, child_pid, NULL, &regs);
+            
+            /* Break if we returned from the function */
+            if(regs.rip - 1 == ret_addr) break;
+
+        }
         /* Remove the breakpoint in foo return address by restoring the previous data(2) */
         ptrace(PTRACE_POKETEXT, child_pid, (void*)ret_addr, (void*)data2);
         regs.rip -= 1;
@@ -144,7 +168,7 @@ int main(int argc, char** argv)
         args[i-4] = argv[i];
     }
     argv[argc-4] = NULL; 
-    int fd = open(fname, O_CREAT | O_RDWR);
+    int fd = open(fname, O_CREAT | O_WRONLY , 0777);
 
     pid_t c_pid = run_target_with_args(args[0], args);
     run_redirection_debugger(c_pid, fd, addr, copy);
