@@ -1,0 +1,5 @@
+PRF:: Has to printed to given output text
+PRF:: Entering caller fucktion, has to print to output file
+PRF:: Entered Calling Func
+PRF:: Has to be printed to given output only once!
+PRF:: We have exited the caller fucktion, after this caller will not write to given output file

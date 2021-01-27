@@ -1,0 +1,2 @@
+print me before the prints of the fucktion!
+print me in std and only there

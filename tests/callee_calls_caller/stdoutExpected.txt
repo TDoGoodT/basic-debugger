@@ -1,0 +1,9 @@
+We are starting the test (printed in stdId no matter what flag you entered)
+Entered Calling Func
+Has to printed to given output text
+Entering caller fucktion, has to print to output file
+Entered Calling Func
+Has to be printed to given output only once!
+We have exited the caller fucktion, after this caller will not write to given output file
+Has to be printed to given output only once!
+We have ended the test (printed in stdId no matter what flag you entered)
